@@ -3,8 +3,8 @@ Contributors: parkerj
 Donate link: none
 Tags: authentication, login, database, ProjectPress, MSSQL, MySQL, PostgreSQL
 Requires at least: 3.1
-Tested up to: 3.4.2
-Stable tag: 1.0
+Tested up to: 3.5
+Stable tag: 1.1
 
 A plugin that allows the use of an external database (MySQL, PostgreSQL, or MSSQL) for authentication into WordPress. Supports various password hashing methods (include PHPass) and user role checks from the external database.
 
@@ -69,3 +69,9 @@ Delete or rename the plugin; if it's a DB connection-related error most likely y
 * Bug Fixes
 * Updated Code
 * Added the option to use PHPass as an encryption type
+
+= 1.1 (2013-01-15) =
+* One setting wasn't registered
+* Fixed issues with "Other" option encryption type
+* Added SQL query for "Other" option encryption type
+* Should now work with plaintext passwords

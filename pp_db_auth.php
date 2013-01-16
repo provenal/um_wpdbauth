@@ -3,7 +3,7 @@
 Plugin Name: External Database Authentication Reloaded
 Plugin URI: http://www.7mediaws.org/extend/plugins/external-db-auth-reloaded/
 Description: Used to externally authenticate WP users with an existing user DB.
-Version: 1.0
+Version: 1.1
 Author: Joshua Parker
 Author URI: http://www.joshparker.us/
 Original Author: Charlene Barina
@@ -46,6 +46,7 @@ function pp_db_auth_activate() {
 	add_option('pp_db_yim',"");
 	add_option('pp_db_jabber',"");
 	add_option('pp_db_enc',"","Type of encoding for external db (default SHA1? or MD5?)");
+	add_option('pp_db_other_enc',"");
 	add_option('pp_db_error_msg',"","Custom login message");
 	add_option('pp_db_role_bool','');
 	add_option('pp_db_role','');
@@ -73,6 +74,7 @@ function pp_db_auth_init(){
 	register_setting('pp_db_auth','pp_db_yim');
 	register_setting('pp_db_auth','pp_db_jabber');
 	register_setting('pp_db_auth','pp_db_enc');
+	register_setting('pp_db_auth','pp_db_other_enc');
 	register_setting('pp_db_auth','pp_db_error_msg');
 	register_setting('pp_db_auth','pp_db_role');
 	register_setting('pp_db_auth','pp_db_role_bool');
@@ -455,6 +457,11 @@ function pp_db_auth_check_login($username,$password) {
 			$query = "SELECT $sqlfields2 FROM " . get_option('pp_db_table') . " WHERE ".get_option('pp_db_namefield')." = '$username' AND ".get_option('pp_db_pwfield')." = '$password2'";                            			
 		    $result = db_functions($driver,"query",$resource,$query);    
 	        $numrows = db_functions($driver,"numrows",$result,"");
+			
+		} elseif(get_option('pp_db_enc') == 'Other') {
+			$query = "SELECT $sqlfields2 FROM " . get_option('pp_db_table') . " WHERE ".get_option('pp_db_namefield')." = '$username' AND ".get_option('pp_db_pwfield')." = '$password2'";                            			
+		    $result = db_functions($driver,"query",$resource,$query);    
+	        $numrows = db_functions($driver,"numrows",$result,"");
 		}
 		
 		if ($numrows) {    //create/update wp account from external database if login/pw exact match exists in that db		
@@ -519,7 +526,37 @@ function pp_db_auth_check_login($username,$password) {
 					 wp_update_user($userarray);
 				}
 				else wp_insert_user($userarray);          //otherwise create
-			} } elseif(get_option('pp_db_enc') == 'MD5' || get_option('pp_db_enc') == 'SHA1') {
+			} } 
+			
+			if(get_option('pp_db_enc') == 'MD5' || get_option('pp_db_enc') == 'SHA1') {
+				if ($process) {
+				$userarray['user_login'] = $username;
+				$userarray['user_pass'] = $password;                    
+				$userarray['first_name'] = $extfields[$sqlfields['first_name']];
+				$userarray['last_name'] = $extfields[$sqlfields['last_name']];        
+				$userarray['user_url'] = $extfields[$sqlfields['user_url']];
+				$userarray['user_email'] = $extfields[$sqlfields['user_email']];
+				$userarray['description'] = $extfields[$sqlfields['description']];
+				$userarray['aim'] = $extfields[$sqlfields['aim']];
+				$userarray['yim'] = $extfields[$sqlfields['yim']];
+				$userarray['jabber'] = $extfields[$sqlfields['jabber']];
+				$userarray['display_name'] = $extfields[$sqlfields['first_name']]." ".$extfields[$sqlfields['last_name']];            
+				
+				//also if no extended data fields
+				if ($userarray['display_name'] == " ") $userarray['display_name'] = $username;
+				
+				db_functions($driver,"close",$resource,"");
+				
+				//looks like wp functions clean up data before entry, so I'm not going to try to clean out fields beforehand.
+				if ($id = username_exists($username)) {   //just do an update
+					 $userarray['ID'] = $id;
+					 wp_update_user($userarray);
+				}
+				else wp_insert_user($userarray);
+				}
+			}
+		
+			if(get_option('pp_db_enc') == 'Other') {
 				if ($process) {
 				$userarray['user_login'] = $username;
 				$userarray['user_pass'] = $password;                    
