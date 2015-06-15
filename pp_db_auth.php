@@ -389,29 +389,37 @@ function pp_check_password($password, $hash, $user_id = '')
     return apply_filters('check_password', $check, $password, $hash, $user_id);
 }
 
-// Filter that voids username if it already exists in the external database table.
-// Thus the caller that applied this filter prior to creating the username in WordPress
-// will know it already exists.
-function pp_db_can_create_username( $username = '', $caller = '' ) {
+
+//	Function that returns the assoc array of field values for row where username matches $username.
+//
+//	@$username	Username of the row to fecth in the database.
+//	@Returns	Key=>Value array for selected row, 0 (zero) if no entry matched $username, or False on error.
+
+function pp_db_user_info( $username = '' ) {
 	
-	if( empty($username) || $caller == "pp_bb_auth" ) return;
-	if( pp_db_check_username($username) > 0 ) $username = '';
+	if( empty($username) ) return false;
 	
+	$host = get_option('pp_host');
+    $db_user = get_option('pp_db_user');
+    $pass = get_option('pp_db_pw');
+    $db = get_option('pp_db');
+    $db_table = get_option('pp_db_table');
+    $uname = get_option('pp_db_namefield');
+    
+    $db_link = mysqli_connect($host, $db_user, $pass, $db) or die("Error " . mysqli_error($db_link));
+    $res = mysqli_query($db_link, "SELECT * FROM `" . $db_table . "` WHERE $uname = '" . $username . "'");
+    if( $res === false ) return false;
+    if( mysqli_num_rows($res) == 0 ) return 0;
+    $row = mysqli_fetch_assoc($res);
+    if( $row === false ) return false;
+    return count($row);
+    
 }
 
-// Filter that voids email if it already exists in the external database table.
-// Thus the caller that applied this filter prior to creating the email adresse in WordPress
-// will know it already exists.
-function pp_db_can_create_email( $email = '', $caller = '' ) {
-	
-	if( empty($email) || $caller == "pp_bb_auth" ) return;
-	if( pp_db_check_email($email) > 0 ) $username = '';
-	
-}
 
-
-// Function that checks if $username exists in user table.
-// Returns row count where username field's value corresponds to $username argument.
+//	Function that checks if $username exists in user table.
+//	Returns associative array of rows matching username,  empty array if none was found,
+//	or False on error.
 function pp_db_check_username($username = '') {
 	
 	if( empty($username) ) return false;
@@ -424,10 +432,13 @@ function pp_db_check_username($username = '') {
     $uname = get_option('pp_db_namefield');
     
     $db_link = mysqli_connect($host, $db_user, $pass, $db) or die("Error " . mysqli_error($db_link));
-    $res = mysqli_query($db_link, "SELECT $uname FROM `" . $db_table . "` WHERE $uname = '" . $username . "'");
-    $row = mysqli_fetch_assoc($res);
-    if( $row === false ) return false;
-    return count($row);
+    $res = mysqli_query($db_link, "SELECT * FROM `" . $db_table . "` WHERE $uname = '" . $username . "'");
+    $entries = array();
+    while($row = mysqli_fetch_assoc($res)) {
+    	if( $row == false ) return false;
+    	$entries[] = $row;
+    }
+    return $entries;
     
 }
 
@@ -445,30 +456,54 @@ function pp_db_check_email($email = '') {
     $umail = get_option('pp_db_user_email');
     
     $db_link = mysqli_connect($host, $db_user, $pass, $db) or die("Error " . mysqli_error($db_link));
-    $res = mysqli_query($db_link, "SELECT $umail FROM `" . $db_table . "` WHERE $umail = '" . $email . "'");
-    $row = mysqli_fetch_assoc($res);
-    if( $row === false ) return false;
-    return count($row);
+    $res = mysqli_query($db_link, "SELECT * FROM `" . $db_table . "` WHERE $umail = '" . $email . "'");
+    $entries = array();
+    while($row = mysqli_fetch_assoc($res)) {
+    	if( $row == false ) return false;
+    	$entries[] = $row;
+    }
+    return $entries;
     
 }
 
+function pp_db_edit_user_profile( $user ) {
+	?>
+		<table class="form-table">
+			<tr>
+				<th><label><?php _e('Répertoire d\'authentification','pp_db');?></label></th>
+				<td>
+					<?php
+						echo '<input type="text" name="directory_service" id="directory_service" value="'.esc_html(get_user_meta($user->ID,'directory_service',true)).'" class="regular-text code" disabled/>';
+					?>
+					<p class="description">
+						<?php _e('Service d\'authentification pour ce compte (e.g. "sim.umontreal.ca" ou "labo23.med.umontreal.ca").','pp_db'); ?>
+					</p>
+				</td>
+			</tr>
+		</table>
+	<?php 
+}
 
-//	Function that validates registration errors (ie: duplicate username or email in
-//	external db).
+//	Function that creates user in external database upon registration if no error occured.
+//
+//	It is primordial that this hook runs after all other hooks for this action across plugins.
+//
+//	Action(s): registration_errors
 function pp_db_registration_errors( $errors = NULL, $username = '', $email = '' ) {
 	
 	if( !is_object($errors) ) $errors = new WP_Error();
 	if( empty($username) ) $errors->add('pp_db_empty_username', __('Username must be provided.'));
 	if( empty($email) ) $errors->add('pp_db_empty_email', __('Email address must be provided.'));
 	
+	//$errors->add('pp_db_user_1', __('POST:<br/>'.serialize($_POST).'<br/>'));
+	//$errors->add('pp_db_user_2', __('User:<br/>'.serialize($old_user).'<br/>'));
 	
-	//	If this plugin is not responsible for creating/storing users from the registration
-	//	form in its own database, simply check for duplicate entries.
+	//	Check for existing username/password.
 	$exists = pp_db_check_username($username);
 	if( $exists === false ) {
 		$errors->add('pp_db_database_error', __('Error while accessing database.'));
 	}
-	elseif( $exists > 0 ) {
+	elseif( is_array($exists) && count($exists) > 0 ) {
 		$errors->add('pp_db_username_exists', __('This username is already taken.'));
 	}
 	
@@ -476,40 +511,288 @@ function pp_db_registration_errors( $errors = NULL, $username = '', $email = '' 
 	if( $exists === false ) {
 		$errors->add('pp_db_database_error', __('Error while accessing database.'));
 	}
-	elseif( $exists > 0 ) {
+	elseif( is_array($exists) && count($exists) > 0 ) {
 		$errors->add('pp_db_email_exists', __('This email address is already taken.'));
+	}
+	
+	//	Errors indicate another plugin has an account with either same username or email.
+	//	Exit.
+	$err_code = $errors->get_error_code();
+	if( !empty($err_code) ) return $errors;
+	
+	// Actual user creation in external db. Wordpress handles the WP database.
+	//	TODO:	Generate random password.
+	//pp_db_register_user( $errors, $username, $email );
+	$user = new WP_User(0, $username);
+	$user->user_login=$username;
+	$user->user_pass=$_POST['user_pass'];
+	$user->user_email=$email;
+	// Actual user creation in external db. Wordpress handles the WP database.
+	//	TODO:	Generate random password.
+	if( pp_db_create_user( $errors, $user ) == true ) {
+		update_user_meta($user->ID, 'directory_service', get_option('pp_host') );
 	}
 	
 	return $errors;
 	
 }
 
+//	Function that creates user in external database upon creation in admin panel if no error occured.
+//	This function actually launches the 'registration_errors' filter for which a hook is
+//	implemented in this plugin. It is in that function that user creation actually occurs.
+//
+//	It is primordial that this hook runs after all other hooks for this action across plugins.
+//
+//	External database field updates (as opposed to creation) are handled by those actions:
+//		personnal_options_update
+//		edit_user_profile_update
+//
+//	Action(s): user_profile_update_errors
+function pp_db_user_profile_update_errors( $errors, $update, $user ) {
+	
+	$err_code = $errors->get_error_code();
+	if( !empty($err_code) ) return;
+	
+	//	Get current user account values (throw error if none found during a user update
+	//	since it should exist).
+	$old_user = get_userdata($user->ID);
+	if( $update == true && $old_user === false ) {
+		$errors->add('pp_db_user_update_error', __('Could not find user in Wordpress database.'));
+	}
+	
+	//$errors->add('pp_db_user_1', __('User:<br/>'.serialize($user).'<br/>'));
+	//$errors->add('pp_db_user_2', __('User:<br/>'.serialize($old_user).'<br/>'));
+	
+	//	Make sure user login is in the values.
+	if( !isset($user->user_login) || empty($user->user_login) ) {
+		$user->user_login = $old_user->user_login;
+	}
+	
+	//	Check if we are updating an account's email address.
+	$update_email = false;
+	if( !empty($user->user_email) && $update && $user->user_email != $old_user->user_email ) {
+		$update_email = true;
+	}
+	
+	$field_username = get_option('pp_db_namefield');
+	$field_email = get_option('pp_db_user_email');
+	
+	//	Check for existing username/email.
+	$match = false;
+	$entries = pp_db_check_username($user->user_login);
+	if( $entries === false ) {
+		$errors->add('pp_db_database_error', __('Error while accessing database.'));
+	}
+	elseif( is_array($entries) && count($entries) > 0 ) {
+		if( $entries[0][$field_email] == $user->user_email || ( $update_email == true && $entries[0][$field_email] == $old_user->user_email ) ) {
+			$match = true;
+		}
+		else {
+			$errors->add('pp_db_username_nomatch', __('Username already exist in external database, but provided email does not match account information.'));
+		}
+	}
+	if( $match == false ) {
+		$entries = pp_db_check_email($user->user_email);
+		if( $entries === false ) {
+			$errors->add('pp_db_database_error', __('Error while accessing database.'));
+		}
+		elseif( is_array($entries) && count($entries) > 0 ) {
+			$errors->add('pp_db_email_nomatch', __('Email already exist in external database, but provided username does not match account information.'));
+		}
+	}
+	
+	//	Exit if an error occured.
+	$err_code = $errors->get_error_code();
+	if( !empty($err_code) ) return;
+	
+	//	Could not find existing account match in external db.
+	if( $match == false ) {
+		
+		//	Wordpress is updating a record that is not handled by this plugin.
+		//	Exit.
+		if( $update == true ) return;
+		
+		
+		//	Creating a new user.
+		//	Check if user should be created in external db, or if it already exists in 
+		//	a database handled by another plugin. Normally, the 'registration_errors' filter
+		//	in a plugin *should* check for existing username/email.
+		//$err = new WP_Error();
+		remove_filter( 'registration_errors', 'pp_db_registration_errors', 99999 );
+		apply_filters( 'registration_errors', $errors, $user->user_login, $user->user_email );
+		add_filter('registration_errors', 'pp_db_registration_errors', 99999, 3);
+		
+		//	Errors indicate another plugin has an account with either same username or email (but not both).
+		//	Exit.
+		//$err_code = $err->get_error_code();
+		$err_code = $errors->get_error_code();
+		if( !empty($err_code) ) return $errors;
+		
+		// Actual user creation in external db. Wordpress handles the WP database.
+		//	TODO:	Generate random password.
+		if( pp_db_create_user( $errors, $user, $match ) == true ) {
+			update_user_meta($user->ID, 'directory_service', get_option('pp_host') );
+		}
+		else {
+			$errors->add('pp_db_database_error', __('External account creation error.'));
+		}
+		
+		
+		
+	}
+	else {	// $match == true
+		
+		//	Account matched in external db. Wheter WP is attempting to update user info
+		//	or creating a new record in its internal database, we have to update external
+		//	database.
+		if( pp_db_create_user( $errors, $user, $match ) == true ) {
+			update_user_meta($user->ID, 'directory_service', get_option('pp_host') );
+		}
+		
+	}
+	
+}
 
-
-//	Function that creates a user in external database.
-function pp_db_create_user( $user_id = 0 ) {
-
-	if( empty($user_id) ) return false;
+//	Function that creates/updates a user record in external database.
+//	TODO:	Handle validating password before update.
+//	Returns true on success, false on error.
+function pp_db_create_user( &$errors = NULL, $user = NULL, $update = NULL ) {
+	
+	if( !is_object($user) ) return false;
+	if( !is_object($errors) ) $errors = new WP_Error();
+	
+	//	Retreive old user values.
+	//	Should be required only if $update==false,
+	//	but I don't feel like checking right now ;)
+	if( isset($user->ID) && !empty($user->ID) ) {
+		$old_user = get_userdata($user->ID);
+	}
+	
+	//	Set user login if not set.
+	if( !isset($user->user_login) || empty($user->user_login) ) {
+		if( !is_object($old_user) || empty($old_user->user_login) ) {
+			$errors->add('pp_db_create_user_error', __('Username must be provided.'));
+			return false;
+		}
+		$user->user_login = $old_user->user_login;
+	}
 	
 	$host = get_option('pp_host');
     $db_user = get_option('pp_db_user');
     $pass = get_option('pp_db_pw');
     $db = get_option('pp_db');
     $db_table = get_option('pp_db_table');
-    $uname = get_option('pp_db_namefield');
+    $field_username = get_option('pp_db_namefield');
+    $field_password = get_option('pp_db_pwfield');
+    $field_email = get_option('pp_db_user_email');
+    $field_firstname = get_option('pp_db_first_name');
+    $field_lastname = get_option('pp_db_last_name');
+    
+    $fields = array();
+    if( $update == false ) $fields[$field_username] = $user->user_login;
+    if( $update == false ) {
+    	if( !empty($user->user_pass) ) {
+    		$fields[$field_password] = md5($user->user_pass);
+    	}
+    	else {
+    		$fields[$field_password] = md5(generate_password());
+    	}
+    }
+    $fields[$field_email] = $user->user_email;
+    $fields[$field_firstname] = $user->first_name;
+    $fields[$field_lastname] = $user->last_name;
+    $sql_set = '';
+	foreach( $fields as $key => $value ) {
+		if( empty($value) ) {
+			unset( $fields[$key] );
+		}
+		else {
+			$sql_set .= ", `$key`='$value'";
+		}
+	}
 	
+	//	No values to create/update.
+	//	Should never happen but we're being cautious.
+	if( empty($sql_set) ) {
+		$errors->add('pp_db_connect_error', __('Error while updating/creating user: no values to store in record.'));
+		return false;
+	}
+	$sql_set = substr($sql_set, 2);	//Remove heading ', ';
+	
+    if( $update == true ) {
+    	
+    	//	We're actually just updating a record, not creating a new one.
+	    $sql = "UPDATE `{$db_table}` SET $sql_set WHERE `{$field_username}`='{$user->user_login}'";
+	    
+	}
+	else {
+		
+		//	Create a new user record in external db.
+		$sql = "INSERT INTO `{$db_table}` SET $sql_set";
+		
+	}
+	
+	$db_link = mysqli_connect($host, $db_user, $pass, $db);
+	if( $db_link === false ) {
+		$errors->add('pp_db_connect_error', __('Error while connecting to external database:<br/>'.mysqli_error($db_link)));
+		return false;
+	}
+    $res = mysqli_query($db_link, $sql);
+    if( $res === false ) {
+    	$errors->add('pp_db_query_error', __('Error while executing query on external database:<br/>'.mysqli_error($db_link)));
+    	return false;
+    }
+    elseif( mysqli_affected_rows($db_link) == 0 ) {
+    	$errors->add('pp_db_update_error', __('Error while creating/updating external database account:<br/>'.mysqli_error($db_link)));
+    	return false;
+    }
+    
+    return true;
+    
 }
 
-/*
-//	Function that deletes a user from WordPress database.
-//	Typically called if registration form was sent to WordPress, created in its internal database,
-//	but an error arises when trying to create user in external database of the plugin.
-function pp_db_delete_wp_user( $user_id = 0 ) {
-	if( empty($user_id) ) return true;
-	return true;
-}
-*/
+//	Function that stores username/email in external db upon self-registration.
+function pp_db_register_user( $errors, $username, $email ) {
 
+	if( !is_object($errors) ) $errors = new WP_Error();
+	
+	$host = get_option('pp_host');
+    $db_user = get_option('pp_db_user');
+    $pass = get_option('pp_db_pw');
+    $db = get_option('pp_db');
+    $db_table = get_option('pp_db_table');
+    $field_username = get_option('pp_db_namefield');
+    $field_email = get_option('pp_db_user_email');
+	
+    $sql = "INSERT INTO `{$db_table}` (`{$field_username}`,`{$field_email}`) VALUES ('{$username}', '{$email}')";
+	$db_link = mysqli_connect($host, $db_user, $pass, $db);
+	if( $db_link === false ) {
+		$errors->add('pp_db_connect_error', __('Error while connecting to external database:<br/>'.mysqli_error($db_link)));
+		return false;
+	}
+    $res = mysqli_query($db_link, $sql);
+    if( $res === false ) {
+    	$errors->add('pp_db_query_error', __('Error while executing query on external database:<br/>'.mysqli_error($db_link)));
+    	return false;
+    }
+    elseif( mysqli_affected_rows($db_link) == 0 ) {
+    	$errors->add('pp_db_update_error', __('Error while creating/updating external database account:<br/>'.mysqli_error($db_link)));
+    	return false;
+    }
+    
+    return true;
+    
+}
+
+/**
+ * Generates a random password.
+ * 
+ * @param int $length Length of the password
+ * @return password as string
+ */
+function generate_password($length = 10) {
+	return substr(md5(uniqid(microtime())), 0, $length);
+}
 
 //actual meat of plugin - essentially, you're setting $username and $password to pass on to the system.
 //You check from your external system and insert/update users into the WP system just before WP actually
@@ -566,8 +849,7 @@ function pp_db_auth_check_login($user = NULL, $username = '', $password = '')
             eval(get_option('pp_db_other_enc'));
             break;
     }
-
-
+	
     //first check to see if login exists in external db
     $query = "SELECT count(*) AS numrows FROM " . get_option('pp_db_table') . " WHERE " . get_option('pp_db_namefield') . " = '$username'";
     $result = db_functions($driver, "query", $resource, $query);
@@ -613,8 +895,8 @@ function pp_db_auth_check_login($user = NULL, $username = '', $password = '')
             $result = db_functions($driver, "query", $resource, $query);
             $numrows = db_functions($driver, "numrows", $result, "");
         }
-
-        if ($numrows) {    //create/update wp account from external database if login/pw exact match exists in that db		
+		
+        if ($numrows) {    //create/update wp account from external database if login/pw exact match exists in that db	
             $extfields = db_functions($driver, "fetch", $result, "");
             $process = TRUE;
 
@@ -743,11 +1025,12 @@ function pp_db_auth_check_login($user = NULL, $username = '', $password = '')
             
             if ($id = username_exists($username)) {
             	$user = new WP_User($id);
+            	update_user_meta($id, 'directory_service', get_option('pp_host'));
             	return $user;
             }
             
         }
-        else { //username exists but wrong password...			
+        else { //username exists but wrong password...	
             global $pp_error;
             $pp_error = "wrongpw";
             return false;
@@ -771,9 +1054,11 @@ function pp_db_errors( $error = '' )
 {
     global $pp_error;
 	
+	/*
     if ($pp_error == "notindb") {
         return $error;
     }
+    */
     if ($pp_error == "wrongrole") {
         $error = "<strong>ERROR:</strong> You don't have permissions to log in.";
     }
@@ -794,12 +1079,13 @@ function pp_db_warning()
 //disables the (useless) password reset option in WP when this plugin is enabled.
 function pp_db_show_password_fields()
 {
-    return 0;
+    return false;
 }
 /*
  * Disable functions.  Idea taken from http auth plugin.
  */
 
+/*
 function disable_function_register()
 {
     $errors = new WP_Error();
@@ -810,6 +1096,7 @@ function disable_function_register()
     <?php
     exit();
 }
+*/
 
 function disable_function()
 {
@@ -822,6 +1109,31 @@ function disable_function()
     <?php
     exit();
 }
+
+//	Adds columns headers into the user list.
+function pp_db_manage_users_columns($columns) {
+	$columns['directory_service'] = __('Authentication', 'pp_db');
+	return $columns;
+}
+
+//	Adds column content for each user on user list.
+//
+//	@param mixed $value Value to show
+//	@param string $column_name Name of column in user table
+//	@param integer $user_id ID of user (the row)  
+function pp_db_manage_users_custom_column( $value, $column_name, $user_id ) {
+
+	// Column "Disabled"
+	if ( $column_name == 'directory_service' ) {
+		$value = get_user_meta($user_id, 'directory_service', true);
+		if (empty($value)) {
+			$value = 'internal';
+		}
+	}
+	
+	return $value;
+}	
+
 add_action('admin_init', 'pp_db_auth_init');
 add_action('admin_menu', 'pp_db_auth_add_menu');
 add_filter('authenticate', 'pp_db_auth_check_login', 10, 3);
@@ -835,6 +1147,10 @@ add_action('profile_personal_options', 'pp_db_warning');
 add_filter('login_errors', 'pp_db_errors', 10, 1);
 add_filter('show_password_fields', 'pp_db_show_password_fields');
 add_filter('login_message', 'pp_db_auth_warning', 10, 1);
-add_filter('registration_errors', 'pp_db_registration_errors', 10, 3);
+add_filter('registration_errors', 'pp_db_registration_errors', 99999, 3);
+add_filter('user_profile_update_errors', 'pp_db_user_profile_update_errors', 99999, 3);
+add_action('edit_user_profile', 'pp_db_edit_user_profile', 10, 3);
+add_filter( 'manage_users_columns', 'pp_db_manage_users_columns', 1, 1 );
+add_filter( 'manage_users_custom_column', 'pp_db_manage_users_custom_column', 1, 3 );
 
 register_activation_hook(__FILE__, 'pp_db_auth_activate');
